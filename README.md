@@ -1,5 +1,5 @@
 # Action Digital Wall Clock ESPHome Hack
-
+![Action Digital Wall Clock](action-digital-wall-clock.jpg)  
 Reverse-engineering and ESPHome conversion of the **Action Digital Wall Clock**.  
 Article **3224328** / **108779** / **PODK1085513**, manufactured by **Schou Company A/S**.
 
