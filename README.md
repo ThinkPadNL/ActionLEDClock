@@ -47,6 +47,8 @@ More importantly, the original MCU does not drive the entire display as one cont
 | R2     | Date                                   |   25 |
 | R11    | Temperature + indicators               |   20 |
 
+The signal between MCU and LEDs was disconnected by desoldering the resistors at the R6, R1, R2, R11 connections. GPIO from ESP8266 where then connected to datalines of WS2812 LED groups.
+
 ## LED mapping
 
 After identifying the WS2812 protocol, an Arduino IDE debug sketch was used to manually illuminate individual LEDs.
