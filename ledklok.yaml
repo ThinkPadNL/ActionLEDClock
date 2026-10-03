@@ -1,42 +1,20 @@
 substitutions:
   device_name: ledklok
   friendly_name: "LED Klok"
-
-  # --------------------------------------------------------------------------
-  # PAS ALLEEN DEZE ENTITY AAN ALS JE TEMPERATUUR OP R11 WILT TONEN.
-  #
-  # Voorbeeld:
-  #   sensor.woonkamer_temperatuur
-  #
-  # SHOW_TEMPERATURE staat in clock_logic.h op true.
-  # Zonder geldige sensor blijft R11 gewoon donker.
-  # --------------------------------------------------------------------------
-
   temperature_entity: sensor.woonkamer_temperatuur
-
 
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
-
   includes:
     - clock_logic.h
-
   project:
     name: "custom.reverse_engineered_led_clock"
-    version: "1.0"
-
-
-# ==============================================================================
-# HARDWARE
-# ==============================================================================
+    version: "1.1"
 
 esp8266:
   board: d1_mini
 
-
-# WiFi connection, correct these
-# with values for your WiFi.
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
@@ -55,237 +33,163 @@ api:
   # Don't reboot when Home Assistant doesn't connect.
   reboot_timeout: 0s
 
+# Enable over-the-air updates.
+ota:
+  platform: esphome
+
 # Enable Web server.
 web_server:
   port: 80
 
-
-# ==============================================================================
-# TIJD
-# ==============================================================================
+captive_portal:
 
 time:
   - platform: sntp
     id: klok_tijd
-
     timezone: Europe/Amsterdam
-
     servers:
-      - 0.nl.pool.ntp.org
-
-    # Direct opnieuw tekenen zodra NTP voor het eerst gesynchroniseerd is.
+      - ntp.home.internal
     on_time_sync:
       then:
-        - lambda: |-
-            auto now = id(klok_tijd).now();
+        - script.execute: render_clock
+    on_time:
+      - seconds: /1
+        then:
+          - script.execute: render_clock
 
-            if (!now.is_valid()) {
-              return;
-            }
+sensor:
+  - platform: homeassistant
+    id: clock_temperature
+    entity_id: ${temperature_entity}
+    internal: true
 
-            auto *r6 =
-              static_cast<esphome::light::AddressableLight *>(
-                id(led_r6).get_output()
-              );
+output:
+  - platform: template
+    id: clock_red_output
+    type: float
+    write_action:
+      - lambda: |-
+          // Virtuele output; fysieke LED's worden door render_clock gestuurd.
 
-            auto *r1 =
-              static_cast<esphome::light::AddressableLight *>(
-                id(led_r1).get_output()
-              );
+  - platform: template
+    id: clock_green_output
+    type: float
+    write_action:
+      - lambda: |-
+          // Virtuele output; fysieke LED's worden door render_clock gestuurd.
 
-            auto *r2 =
-              static_cast<esphome::light::AddressableLight *>(
-                id(led_r2).get_output()
-              );
+  - platform: template
+    id: clock_blue_output
+    type: float
+    write_action:
+      - lambda: |-
+          // Virtuele output; fysieke LED's worden door render_clock gestuurd.
 
-            auto *r11 =
-              static_cast<esphome::light::AddressableLight *>(
-                id(led_r11).get_output()
-              );
+light:
+  - platform: rgb
+    id: clock_control
+    name: "Klok verlichting"
+    red: clock_red_output
+    green: clock_green_output
+    blue: clock_blue_output
+    gamma_correct: 1.0
+    restore_mode: RESTORE_DEFAULT_ON
+    on_state:
+      then:
+        - script.execute: render_clock
 
-            klok::render_time(
+  - platform: neopixelbus
+    id: led_r6
+    name: "R6"
+    internal: true
+    type: GRB
+    variant: WS2812
+    pin: GPIO5
+    num_leds: 36
+    restore_mode: ALWAYS_OFF
+
+  - platform: neopixelbus
+    id: led_r1
+    name: "R1"
+    internal: true
+    type: GRB
+    variant: WS2812
+    pin: GPIO4
+    num_leds: 32
+    restore_mode: ALWAYS_OFF
+
+  - platform: neopixelbus
+    id: led_r2
+    name: "R2"
+    internal: true
+    type: GRB
+    variant: WS2812
+    pin: GPIO14
+    num_leds: 25
+    restore_mode: ALWAYS_OFF
+
+  - platform: neopixelbus
+    id: led_r11
+    name: "R11"
+    internal: true
+    type: GRB
+    variant: WS2812
+    pin: GPIO12
+    num_leds: 20
+    restore_mode: ALWAYS_OFF
+
+switch:
+  - platform: template
+    id: show_dst
+    name: "Klok DST-indicatie"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - script.execute: render_clock
+    turn_off_action:
+      - script.execute: render_clock
+
+script:
+  - id: render_clock
+    mode: restart
+    then:
+      - lambda: |-
+          auto now = id(klok_tijd).now();
+          if (!now.is_valid()) {
+            return;
+          }
+
+          auto *r6 = static_cast<esphome::light::AddressableLight *>(
+              id(led_r6).get_output());
+          auto *r1 = static_cast<esphome::light::AddressableLight *>(
+              id(led_r1).get_output());
+          auto *r2 = static_cast<esphome::light::AddressableLight *>(
+              id(led_r2).get_output());
+          auto *r11 = static_cast<esphome::light::AddressableLight *>(
+              id(led_r11).get_output());
+
+          float red = 1.0f;
+          float green = 1.0f;
+          float blue = 1.0f;
+
+          id(clock_control).current_values_as_rgb(&red, &green, &blue);
+
+          bool light_on = id(clock_control).current_values.is_on();
+          bool dst_enabled = id(show_dst).state;
+
+          bool temperature_valid = id(clock_temperature).has_state();
+          float temperature = id(clock_temperature).state;
+
+          klok::render_time(
               r6,
               r1,
               r2,
               r11,
               now,
-              id(clock_temperature).state,
-              id(clock_temperature).has_state()
-            );
-
-    # Elke seconde.
-    on_time:
-      - seconds: /1
-        then:
-          - lambda: |-
-              auto now = id(klok_tijd).now();
-
-              if (!now.is_valid()) {
-                return;
-              }
-
-              auto *r6 =
-                static_cast<esphome::light::AddressableLight *>(
-                  id(led_r6).get_output()
-                );
-
-              auto *r1 =
-                static_cast<esphome::light::AddressableLight *>(
-                  id(led_r1).get_output()
-                );
-
-              auto *r2 =
-                static_cast<esphome::light::AddressableLight *>(
-                  id(led_r2).get_output()
-                );
-
-              auto *r11 =
-                static_cast<esphome::light::AddressableLight *>(
-                  id(led_r11).get_output()
-                );
-
-              klok::render_time(
-                r6,
-                r1,
-                r2,
-                r11,
-                now,
-                id(clock_temperature).state,
-                id(clock_temperature).has_state()
-              );
-
-
-# ==============================================================================
-# TEMPERATUUR UIT HOME ASSISTANT
-# ==============================================================================
-
-# Deze is optioneel voor de werking van de klok.
-#
-# Vervang:
-#
-#   sensor.jouw_temperatuur_sensor
-#
-# door de daadwerkelijke temperatuur-entiteit in HA.
-#
-# De Home Assistant sensor-integratie haalt hiervoor een numerieke state
-# rechtstreeks via de ESPHome native API op.
-
-sensor:
-
-  - platform: homeassistant
-    id: clock_temperature
-
-    entity_id: ${temperature_entity}
-
-    internal: true
-
-
-# ==============================================================================
-# LED STRIPS
-# ==============================================================================
-
-light:
-
-  # ---------------------------------------------------------------------------
-  # R6
-  #
-  # Wemos D1 mini:
-  #   D1 = GPIO5
-  #
-  # 36 LEDs
-  #
-  # HH + weekdag + PM
-  # ---------------------------------------------------------------------------
-
-  - platform: neopixelbus
-    id: led_r6
-
-    name: "R6"
-    internal: true
-
-    type: GRB
-    variant: WS2812
-
-    pin: GPIO5
-    num_leds: 36
-
-    restore_mode: ALWAYS_OFF
-
-
-  # ---------------------------------------------------------------------------
-  # R1
-  #
-  # D2 = GPIO4
-  #
-  # 32 LEDs
-  #
-  # MM + dubbele punt + alarm
-  # ---------------------------------------------------------------------------
-
-  - platform: neopixelbus
-    id: led_r1
-
-    name: "R1"
-    internal: true
-
-    type: GRB
-    variant: WS2812
-
-    pin: GPIO4
-    num_leds: 32
-
-    restore_mode: ALWAYS_OFF
-
-
-  # ---------------------------------------------------------------------------
-  # R2
-  #
-  # D5 = GPIO14
-  #
-  # 25 LEDs
-  #
-  # DD + MM
-  # ---------------------------------------------------------------------------
-
-  - platform: neopixelbus
-    id: led_r2
-
-    name: "R2"
-    internal: true
-
-    type: GRB
-    variant: WS2812
-
-    pin: GPIO14
-    num_leds: 25
-
-    restore_mode: ALWAYS_OFF
-
-
-  # ---------------------------------------------------------------------------
-  # R11
-  #
-  # D6 = GPIO12
-  #
-  # 20 LEDs
-  #
-  # temperatuur + C/F + DST
-  #
-  # BELANGRIJK:
-  # je oorspronkelijke telling was "19 pixels", maar je hebt nu LED 0 t/m
-  # LED 19 daadwerkelijk getest. Dat zijn dus 20 fysieke pixels.
-  # ---------------------------------------------------------------------------
-
-  - platform: neopixelbus
-    id: led_r11
-
-    name: "R11"
-    internal: true
-
-    type: GRB
-    variant: WS2812
-
-    pin: GPIO12
-    num_leds: 20
-
-    restore_mode: ALWAYS_OFF
+              red,
+              green,
+              blue,
+              light_on,
+              dst_enabled,
+              temperature,
+              temperature_valid);
